@@ -1,0 +1,86 @@
+# ============================================================
+# 公共配置（与环境无关的部分）
+#
+# 环境相关配置已拆分：
+#   application-dev.yml   本地开发（直连本机 MySQL，打印 SQL）
+#   application-prod.yml  生产（数据库连接全部取自环境变量，不打印 SQL）
+#
+# 启动方式：
+#   本地：直接 run，默认 profile 就是 dev
+#   生产：java -jar app.jar --spring.profiles.active=prod
+#        并设置 DB_HOST / DB_PORT / DB_NAME / DB_USERNAME / DB_PASSWORD
+# ============================================================
+server:
+  port: 8088
+
+spring:
+  application:
+    name: hotelmanagement
+  profiles:
+    # 默认走本地开发配置
+    active: dev
+  data:
+    redis:
+      # 连接信息取环境变量，本地开发用默认值 localhost:6379 即可；
+      # 生产通过 REDIS_HOST / REDIS_PORT / REDIS_PASSWORD 覆盖。
+      # Windows 本机可用 Memurai（Redis 兼容实现）。
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 3000ms
+      lettuce:
+        pool:
+          max-active: 16
+          max-idle: 8
+          min-idle: 2
+          # 池耗尽时最多等 2 秒，避免线程无限阻塞
+          max-wait: 2000ms
+
+# MyBatis-Plus 配置
+mybatis-plus:
+  configuration:
+    # 开启驼峰命名映射（数据库下划线字段 -> 实体类驼峰属性）
+    map-underscore-to-camel-case: true
+  # 实体类包扫描路径
+  type-aliases-package: com.hotel.hotelmanagement.entity
+  # 全局配置
+  global-config:
+    db-config:
+      # 主键策略：数据库自增
+      id-type: auto
+      # 说明：本项目不做逻辑删除。房间/客户有历史订单时直接拒绝物理删除
+      # （见 RoomServiceImpl / CustomerServiceImpl），因此这里不再声明
+      # logic-delete-field，避免让人误以为删除是"软删除"。
+
+# 业务配置
+hotel:
+  # ===== 登录会话存储 =====
+  # redis（默认）：token 存 Redis，带 TTL 与滑动续期，重启不丢、多实例可用；
+  # memory：退回原 ConcurrentHashMap 实现（无 TTL 时效之外的行为一致），
+  #         供本机没装 Redis 或跑测试时使用。
+  token-store: redis
+  token:
+    # 会话有效期（小时）。滑动续期：每次有效请求都会把 TTL 重置回该值，
+    # 持续使用的账号不会被登出，闲置超过该时长的 token 自动失效。
+    ttl-hours: 24
+  # ===== 读路径缓存 =====
+  # redis（默认）：缓存进 Redis，多实例共享；memory：进程内缓存（测试/免 Redis 场景）。
+  # 只缓存「展示读路径」：管理端房态图、客人端房间列表、统计看板。
+  # 下单/支付/入住的占用校验永远直查数据库（行锁 + 实时判定），绝不读缓存——
+  # 缓存最多让人「看到可订但下单被告知冲突」，不会造成超卖。
+  cache-type: redis
+  cache:
+    # 统计看板 TTL（秒）
+    dashboard-ttl-seconds: 60
+    # 房态/可订房间列表 TTL（秒）。所有订单与房间写操作都会主动清空缓存，
+    # 该 TTL 只是兜底（比如覆盖「先驱逐后提交」的微小窗口）。
+    availability-ttl-seconds: 30
+  order:
+    # 待支付订单的占位时长（分钟）：超过该时长仍未支付则不再占用房间，
+    # 避免用户下单后不付款把房间锁死。与房态判定、定时取消任务共用。
+    pending-payment-minutes: 30
+  refund:
+    # 距入住日的天数 >= 该值时取消，全额退款；否则按下面的规则处理
+    free-cancel-days: 1
+    # 未达到 free-cancel-days 时是否扣除首晚房费（false 则仍全额退）
+    charge-first-night: true

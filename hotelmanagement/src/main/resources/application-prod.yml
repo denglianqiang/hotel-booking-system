@@ -1,0 +1,29 @@
+# ============================================================
+# 生产环境
+#   - 数据库连接信息全部取自环境变量，不把口令写进仓库
+#   - 关闭 SQL 日志，日志级别收敛到 INFO
+#
+# 启动示例：
+#   DB_HOST=10.0.0.12 DB_NAME=hotel_db DB_USERNAME=hotel DB_PASSWORD=****** \
+#   java -jar hotelmanagement-0.0.1-SNAPSHOT.jar --spring.profiles.active=prod
+# ============================================================
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:hotel_db}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${DB_USERNAME:root}
+    # 生产环境不提供默认口令，必须通过环境变量注入
+    password: ${DB_PASSWORD:}
+    hikari:
+      minimum-idle: 5
+      maximum-pool-size: 30
+      idle-timeout: 30000
+      max-lifetime: 1800000
+      connection-timeout: 30000
+
+logging:
+  level:
+    root: INFO
+    com.hotel.hotelmanagement: INFO
+    # 生产环境不打印 SQL
+    com.hotel.hotelmanagement.mapper: INFO

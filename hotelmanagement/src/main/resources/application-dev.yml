@@ -1,0 +1,32 @@
+# ============================================================
+# 本地开发环境
+#   - 直连本机 MySQL
+#   - 打开完整 SQL 日志与 DEBUG 级别日志，便于排查
+# 生产环境请使用 application-prod.yml（数据库口令取自环境变量）
+# ============================================================
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/hotel_db?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: root
+    # 仅本地开发使用的默认口令，可通过环境变量 DB_PASSWORD 覆盖
+    password: ${DB_PASSWORD:}
+    hikari:
+      # 连接池配置
+      minimum-idle: 5
+      maximum-pool-size: 20
+      idle-timeout: 30000
+      max-lifetime: 1800000
+      connection-timeout: 30000
+
+mybatis-plus:
+  configuration:
+    # 打印 SQL 日志，方便开发调试（生产环境关闭）
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+logging:
+  level:
+    root: INFO
+    com.hotel.hotelmanagement: DEBUG
+    com.hotel.hotelmanagement.mapper: DEBUG
+    org.springframework.web: INFO
