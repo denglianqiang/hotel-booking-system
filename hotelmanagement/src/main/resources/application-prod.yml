@@ -2,11 +2,16 @@
 # 生产环境
 #   - 数据库连接信息全部取自环境变量，不把口令写进仓库
 #   - 关闭 SQL 日志，日志级别收敛到 INFO
+#   - 信任反向代理的 Forwarded 头（Nginx 已透传 Host/X-Forwarded-*），
+#     使浏览器同源请求被正确识别，不再误入 CORS 校验
 #
 # 启动示例：
 #   DB_HOST=10.0.0.12 DB_NAME=hotel_db DB_USERNAME=hotel DB_PASSWORD=****** \
 #   java -jar hotelmanagement-0.0.1-SNAPSHOT.jar --spring.profiles.active=prod
 # ============================================================
+server:
+  forward-headers-strategy: framework
+
 spring:
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
