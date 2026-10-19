@@ -74,4 +74,5 @@ jobs:
         run: docker build -f deploy/nginx/Dockerfile -t hotel-frontend:ci .
 
       - name: Compose 配置校验
-        run: docker compose config --quiet && echo "compose 配置合法"
+        # CI 上没有 .env，注入占位密码仅用于让 :? 强制存在语法通过
+        run: DB_PASSWORD=dummy docker compose config --quiet && echo "compose 配置合法"
