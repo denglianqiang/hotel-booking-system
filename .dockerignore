@@ -1,0 +1,13 @@
+.git
+.workbuddy
+.idea
+docs
+**/target
+**/node_modules
+hotelWeb/dist
+**/.env
+**/.env.*
+!hotelWeb/.env.production
+*.iml
+*.md
+!hotelWeb/package-lock.json

@@ -1,0 +1,109 @@
+# ============================================================
+# 酒店客房预订管理系统 - Docker Compose 四件套
+#   nginx  ：前端静态托管（gzip/缓存）+ 接口反代，对外的唯一入口
+#   app    ：Spring Boot 后端（仅接口与 Swagger）
+#   mysql  ：MySQL 8，首次启动自动执行 sql/ 下的建表与演示数据脚本
+#   redis  ：Redis 7（会话 + 缓存）
+#
+# 用法：
+#   1. 复制 .env.example 为 .env，改掉 DB_PASSWORD
+#   2. docker compose up -d --build
+#   3. 浏览器打开 http://localhost（80 端口被占用时改成 8080:80）
+# ============================================================
+
+services:
+
+  mysql:
+    image: mysql:8.0
+    container_name: hotel-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:?请先在 .env 中设置 DB_PASSWORD}
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_general_ci
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # 首次启动（数据卷为空）时按文件名顺序自动执行
+      - ./hotelmanagement/sql/hotel_db.sql:/docker-entrypoint-initdb.d/01-hotel_db.sql:ro
+      # 不想要演示订单数据就删掉下面这行（登录账号不受影响，但看板会没数据）
+      - ./hotelmanagement/sql/answer_demo_data.sql:/docker-entrypoint-initdb.d/02-answer_demo_data.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    # 如需从宿主机连库调试，解开下面两行（仅限本机开发，线上不要暴露）
+    # ports:
+    #   - "3306:3306"
+    networks:
+      - hotel-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: hotel-redis
+    restart: unless-stopped
+    # 仅容器内网络使用，不对外暴露端口；开启 AOF 防止重启丢会话
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - hotel-net
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: hotel-management:latest
+    container_name: hotel-app
+    restart: unless-stopped
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: hotel_db
+      DB_USERNAME: root
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ""
+      TZ: Asia/Shanghai
+    # 后端不再直接对宿主机开放，统一从 Nginx 进；调试时解开下面两行
+    # ports:
+    #   - "127.0.0.1:8088:8088"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - hotel-net
+
+  nginx:
+    build:
+      context: .
+      dockerfile: deploy/nginx/Dockerfile
+    image: hotel-frontend:latest
+    container_name: hotel-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"   # 如宿主机 80 被占用（如 IIS），改为 "8080:80"
+    depends_on:
+      - app
+    networks:
+      - hotel-net
+
+networks:
+  hotel-net:
+    driver: bridge
+
+volumes:
+  mysql-data:
+  redis-data:

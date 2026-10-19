@@ -103,6 +103,37 @@ npm run dev
 
 > 两种内置角色是 RBAC 的演示视角：用 operator 登录可以在「账号管理」里新增角色、勾选权限，再把账号挂到新角色上，直观感受权限边界的即时变化。
 
+## Docker 部署（推荐）
+
+需要 Docker Desktop（Linux 服务器则装 docker-ce 与 compose 插件）。共 4 个容器：
+**Nginx**（前端托管 + gzip/30 天静态缓存 + 接口反代）→ **app**（Spring Boot）→
+**MySQL** + **Redis**。Nginx 是唯一对外入口，刷新前端路由不 404；Swagger 经反代照常可访问：
+
+```bash
+# 1. 准备环境变量（.env 内 DB_PASSWORD 自己定一个，会被 mysql 容器与后端共用）
+Copy-Item .env.example .env    # macOS/Linux 用 cp
+
+# 2. 构建并启动（首次会拉取 node/maven/jre/mysql/redis/nginx 镜像，稍久）
+docker compose up -d --build
+
+# 3. 访问
+# 浏览器打开 http://localhost，账号 admin / admin123
+# Swagger 地址：http://localhost/swagger-ui.html
+```
+
+常用命令：
+
+```bash
+docker compose logs -f app      # 跟踪后端日志
+docker compose logs -f nginx    # 跟踪 Nginx 访问日志
+docker compose down             # 停止（数据保留在 mysql-data / redis-data 卷中）
+docker compose down -v          # 停止并清空数据库数据（下次启动会重新执行 sql 初始化）
+docker compose up -d --build    # 代码更新后重建
+```
+
+ MySQL 与 Redis 不对外暴露端口，仅容器内网络互通；后端调试端口与
+mysql 3306 端口映射见 docker-compose.yml 中的注释。
+
 ## 项目结构
 
 ```
