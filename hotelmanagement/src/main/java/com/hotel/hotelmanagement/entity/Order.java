@@ -51,7 +51,7 @@ public class Order {
     /** 支付时间 */
     private LocalDateTime paidTime;
 
-    /** 待支付截止时间（超过则不再占用房间，由定时任务自动取消） */
+    /** 待支付截止时间（超时由定时任务自动取消；待支付订单本身不占用房间） */
     private LocalDateTime payDeadline;
 
     /** 取消时间 */

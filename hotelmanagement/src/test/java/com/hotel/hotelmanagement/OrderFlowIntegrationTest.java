@@ -132,19 +132,61 @@ class OrderFlowIntegrationTest {
     // ===================== 测试 =====================
 
     @Test
-    @DisplayName("超卖回归：同一房间同一日期区间重复下单，第二单必须被拒绝")
-    void duplicateBookingForSameRoomAndDatesIsRejected() throws Exception {
+    @DisplayName("未付款不锁房：同房间同区间允许多笔待支付订单，先付先得，后付被拒")
+    void unpaidOrderDoesNotBlockRoomAndFirstPayWins() throws Exception {
         String token = login("admin", "admin123");
         LocalDate in = LocalDate.now().plusDays(30);
         LocalDate out = in.plusDays(2);
         long roomId = findAvailableRoomId(token, in, out);
 
-        JsonNode first = createOrder(token, roomId, 2L, in, out);
-        assertThat(first.path("code").asInt()).isEqualTo(200);
+        long firstId = createOrder(token, roomId, 2L, in, out).path("data").path("id").asLong();
 
+        // 待支付订单不占用房间：另一客户在相同房间、相同区间的订单也可以创建
         JsonNode second = createOrder(token, roomId, 3L, in, out);
-        assertThat(second.path("code").asInt()).isNotEqualTo(200);
-        assertThat(second.path("message").asText()).contains("已被预订");
+        assertThat(second.path("code").asInt())
+                .as("待支付订单不应锁房: " + second.path("message").asText()).isEqualTo(200);
+        long secondId = second.path("data").path("id").asLong();
+
+        // 先支付者占用成功
+        assertThat(postJson("/order/pay", token, "{\"orderId\":" + firstId + "}").path("code").asInt()).isEqualTo(200);
+
+        // 后支付者被支付时的房态复核拒绝，房间不会被双卖
+        JsonNode latePay = postJson("/order/pay", token, "{\"orderId\":" + secondId + "}");
+        assertThat(latePay.path("code").asInt()).isNotEqualTo(200);
+        assertThat(latePay.path("message").asText()).contains("已被其他订单占用");
+    }
+
+    @Test
+    @DisplayName("在途订单上限：同一客户的 待支付/已支付/已入住 达到上限后不允许再订")
+    void customerActiveOrderLimitIsEnforced() throws Exception {
+        String token = login("admin", "admin123");
+
+        // 新建一个无任何订单的客户（手机号从时间戳构造，保证唯一）
+        String phone = "137" + String.format("%08d", System.currentTimeMillis() % 100000000L);
+        JsonNode saved = postJson("/customer/save", token,
+                "{\"name\":\"限额测试客户\",\"phone\":\"" + phone + "\"}");
+        assertThat(saved.path("code").asInt())
+                .as("建档应成功: " + saved.path("message").asText()).isEqualTo(200);
+        JsonNode list = postJson("/customer/list", token,
+                "{\"current\":1,\"size\":10,\"phone\":\"" + phone + "\"}");
+        long customerId = list.path("data").path("records").path(0).path("id").asLong();
+
+        LocalDate in = LocalDate.now().plusDays(80);
+        LocalDate out = in.plusDays(2);
+
+        // 连订 3 间不同房间（上限默认 3）：都应成功
+        for (int i = 0; i < 3; i++) {
+            long roomId = findAvailableRoomId(token, in, out);
+            JsonNode order = createOrder(token, roomId, customerId, in, out);
+            assertThat(order.path("code").asInt())
+                    .as("第 " + (i + 1) + " 单应成功: " + order.path("message").asText()).isEqualTo(200);
+        }
+
+        // 第 4 单：超过上限，拒绝
+        long roomId = findAvailableRoomId(token, in, out);
+        JsonNode fourth = createOrder(token, roomId, customerId, in, out);
+        assertThat(fourth.path("code").asInt()).isNotEqualTo(200);
+        assertThat(fourth.path("message").asText()).contains("已达上限");
     }
 
     @Test

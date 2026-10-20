@@ -68,13 +68,17 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     private final RefundProperties refundProperties;
     private final SeqMapper seqMapper;
 
-    /** 待支付订单的占位时长（分钟），与房态判定、自动取消保持一致 */
+    /** 待支付订单的支付截止时长（分钟），与自动取消任务保持一致 */
     private final long pendingPaymentMinutes;
+
+    /** 同一客户最多同时持有的在途订单数（待支付/已支付/已入住计入） */
+    private final int maxActiveOrders;
 
     public OrderServiceImpl(RoomService roomService, CustomerService customerService, CheckInService checkInService,
                             RoomMapper roomMapper, RoomAvailabilityService roomAvailabilityService,
                             OrderLogMapper orderLogMapper, RefundProperties refundProperties, SeqMapper seqMapper,
-                            @Value("${hotel.order.pending-payment-minutes:30}") long pendingPaymentMinutes) {
+                            @Value("${hotel.order.pending-payment-minutes:30}") long pendingPaymentMinutes,
+                            @Value("${hotel.order.max-active-orders:3}") int maxActiveOrders) {
         this.roomService = roomService;
         this.customerService = customerService;
         this.checkInService = checkInService;
@@ -84,6 +88,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         this.refundProperties = refundProperties;
         this.seqMapper = seqMapper;
         this.pendingPaymentMinutes = pendingPaymentMinutes;
+        this.maxActiveOrders = maxActiveOrders;
     }
 
     /**
@@ -118,7 +123,18 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             throw new BusinessException("客户不存在");
         }
 
-        // 4. 占用校验：统一走 RoomAvailabilityService（含未超时的待支付订单）
+        // 3.1 在途订单上限：同一客户名下 待支付/已支付/已入住 订单数达到上限后不允许再订，
+        //     防止单个客户囤积多个房间（含下单不付款占住房源的刷单行为）
+        Long activeCount = this.lambdaQuery()
+                .eq(Order::getCustomerId, dto.getCustomerId())
+                .in(Order::getStatus, 0, 1, 2)
+                .count();
+        if (activeCount >= maxActiveOrders) {
+            throw new BusinessException("该客户名下在途订单（待支付/已支付/已入住）已达上限 " + maxActiveOrders + " 单，无法继续预订");
+        }
+
+        // 4. 占用校验：仅已支付/已入住订单才占用房间（待支付不锁房，先付先得，
+        //    并发冲突由支付时的房态复核 + 房间行锁兜底）
         if (!roomAvailabilityService.isRoomAvailable(dto.getRoomId(), dto.getCheckInDate(), dto.getCheckOutDate(), null)) {
             throw new BusinessException("该房间在选定日期范围内已被预订，请更换日期或房间");
         }

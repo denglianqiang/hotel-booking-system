@@ -19,7 +19,7 @@ public interface RoomAvailabilityService {
     /** 派生占用状态：可订 */
     String AVAILABLE = "available";
 
-    /** 派生占用状态：已订（区间内有未超时待支付或已支付订单） */
+    /** 派生占用状态：已订（区间内有已支付订单） */
     String BOOKED = "booked";
 
     /** 派生占用状态：在住（区间内有已入住订单） */

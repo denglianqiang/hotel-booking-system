@@ -22,10 +22,14 @@ import java.util.stream.Collectors;
 public class RoomAvailabilityServiceImpl implements RoomAvailabilityService {
 
     /**
-     * 会占用房间的订单状态：0待支付 / 1已支付 / 2已入住。
+     * 会占用房间的订单状态：1已支付 / 2已入住。
+     * 0待支付不占用房间（未付款不锁房，冲突在支付时的房态复核解决）；
      * 3已退房、4已取消 不再占用房间。
      */
-    private static final List<Integer> OCCUPYING_STATUS = List.of(0, 1, 2);
+    private static final List<Integer> OCCUPYING_STATUS = List.of(1, 2);
+
+    /** 判定「房间有未完结订单」时额外计入的状态：0待支付（未过支付截止时间才计） */
+    private static final int STATUS_PENDING_PAYMENT = 0;
 
     /** 已入住订单在"择优展示占用方"时的权重 */
     private static final int WEIGHT_CHECKED_IN = 2;
@@ -34,8 +38,9 @@ public class RoomAvailabilityServiceImpl implements RoomAvailabilityService {
     private static final int WEIGHT_PAID = 1;
 
     /**
-     * 待支付订单的占位时长（分钟）：超过该时长仍未支付的订单不再占用房间，
-     * 避免用户下单后不付款把房间永久锁死。与定时取消任务共用该配置。
+     * 待支付订单的支付截止时长（分钟）：超时由定时任务自动取消，
+     * 与自动取消任务、待支付房间的「未完结」判定共用该配置。
+     * 待支付订单不再单独占用房间（见 {@link #OCCUPYING_STATUS}）。
      */
     private final long pendingPaymentMinutes;
 
@@ -75,11 +80,13 @@ public class RoomAvailabilityServiceImpl implements RoomAvailabilityService {
         LocalDateTime legacyDeadline = now.minusMinutes(pendingPaymentMinutes);
         return orderMapper.selectCount(new LambdaQueryWrapper<Order>()
                 .eq(Order::getRoomId, roomId)
-                .in(Order::getStatus, OCCUPYING_STATUS)
-                // 已支付/已入住不受时间限制；待支付订单仅保留未过截止时间的
-                .and(w -> w.ne(Order::getStatus, 0)
-                        .or().gt(Order::getPayDeadline, now)
-                        .or(x -> x.isNull(Order::getPayDeadline).gt(Order::getCreateTime, legacyDeadline)))) > 0;
+                // 已支付/已入住一律算未完结；待支付订单仅保留未过截止时间的
+                .and(w -> w.in(Order::getStatus, OCCUPYING_STATUS)
+                        .or(x -> x.eq(Order::getStatus, STATUS_PENDING_PAYMENT)
+                                .gt(Order::getPayDeadline, now)
+                                .or(y -> y.eq(Order::getStatus, STATUS_PENDING_PAYMENT)
+                                        .isNull(Order::getPayDeadline)
+                                        .gt(Order::getCreateTime, legacyDeadline))))) > 0;
     }
 
     @Override
@@ -138,23 +145,17 @@ public class RoomAvailabilityServiceImpl implements RoomAvailabilityService {
      * <p>区间重叠判定：已有订单.入住日 &lt; 本次退房日 且 已有订单.退房日 &gt; 本次入住日。
      * 采用左闭右开区间，因此「上一单 10-07 退房、下一单 10-07 入住」不算冲突。
      *
-     * <p>待支付(0) 订单只在其创建后的 {@code pendingPaymentMinutes} 分钟内算占用。
+     * <p>0待支付 不算占用：未付款不锁房，同一房间允许多笔待支付订单并存，
+     * 谁先支付谁占用成功；后付者在支付时的房态复核里被拒绝。
      */
     private List<Order> findOccupyingOrders(LocalDate checkInDate, LocalDate checkOutDate,
                                             Long roomId, Long excludeOrderId) {
-        LocalDateTime now = LocalDateTime.now();
-        LocalDateTime legacyDeadline = now.minusMinutes(pendingPaymentMinutes);
         return orderMapper.selectList(new LambdaQueryWrapper<Order>()
                 .in(Order::getStatus, OCCUPYING_STATUS)
                 .lt(Order::getCheckInDate, checkOutDate)
                 .gt(Order::getCheckOutDate, checkInDate)
                 .eq(roomId != null, Order::getRoomId, roomId)
-                .ne(excludeOrderId != null, Order::getId, excludeOrderId)
-                // 已支付/已入住不受时间限制；待支付订单仅保留未过截止时间的
-                // （新订单按 pay_deadline 判断；改造前的历史订单没有该字段，用创建时间兜底）
-                .and(w -> w.ne(Order::getStatus, 0)
-                        .or().gt(Order::getPayDeadline, now)
-                        .or(x -> x.isNull(Order::getPayDeadline).gt(Order::getCreateTime, legacyDeadline))));
+                .ne(excludeOrderId != null, Order::getId, excludeOrderId));
     }
 
     /** 入住日期缺省取今天 */
